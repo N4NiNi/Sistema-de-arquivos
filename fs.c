@@ -43,13 +43,36 @@ dir_entry dir[DIRENTRIES];
 
 
 int fs_init() {
-  printf("Função não implementada: fs_init\n");
+  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE; i++){
+    bl_read(i, fat);
+    j += CLUSTERSIZE/2;
+  }
+  
+  for (unsigned i = 0; i < 32; i++)
+    if(fat[i] != 3){
+      fs_format();
+      return 1;
+    }
+
   return 1;
 }
 
 int fs_format() {
-  printf("Função não implementada: fs_format\n");
-  return 0;
+  unsigned i = 0;
+  for (; i < FATCLUSTERS/CLUSTERSIZE; i++)
+    fat[i] = 3;
+  //arruma aqui em baixo
+  //É so um diretorio
+  for (; i < sizeof(dir_entry); i++)
+    fat[i] = 4;
+  for (; i < FATCLUSTERS - 2; i++)
+    fat[i] = 1;
+  fat[FATCLUSTERS - 1] = 2;
+  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE; i++){
+    bl_write(i, &fat[j]);
+    j += CLUSTERSIZE/2;
+  }
+  return 1;
 }
 
 int fs_free() {
