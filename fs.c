@@ -43,32 +43,31 @@ dir_entry dir[DIRENTRIES];
 
 
 int fs_init() {
-  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE; i++){
-    bl_read(i, fat);
+  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
+    bl_read(i, &fat[j]);
     j += CLUSTERSIZE/2;
   }
   
   for (unsigned i = 0; i < 32; i++)
     if(fat[i] != 3){
+      printf("Imagem criada\n");
       fs_format();
       return 1;
     }
-
+    
+  printf("Imagem recuperada\n");
   return 1;
 }
 
 int fs_format() {
   unsigned i = 0;
-  for (; i < FATCLUSTERS/CLUSTERSIZE; i++)
+  for (; i < FATCLUSTERS/CLUSTERSIZE * 2; i++)
     fat[i] = 3;
-  //arruma aqui em baixo
-  //É so um diretorio
-  for (; i < sizeof(dir_entry); i++)
-    fat[i] = 4;
-  for (; i < FATCLUSTERS - 2; i++)
+  fat[i] = 4;
+  i++;
+  for (; i < FATCLUSTERS; i++)
     fat[i] = 1;
-  fat[FATCLUSTERS - 1] = 2;
-  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE; i++){
+  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
     bl_write(i, &fat[j]);
     j += CLUSTERSIZE/2;
   }
@@ -86,9 +85,32 @@ int fs_list(char *buffer, int size) {
 }
 
 int fs_create(char* file_name) {
-  printf("Função não implementada: fs_create\n");
+  unsigned i_dir_entry_livre = -1;
+  for (unsigned i = 0; i < DIRENTRIES; i++){
+    if(strcmp(dir[i].name, file_name) == 0){
+      printf("Arquivo já existente\n");
+      return 0;
+    }
+    if(i_dir_entry_livre == -1 && !dir[i].used)
+      i_dir_entry_livre = i;
+  }
+
+  for (unsigned i = FATCLUSTERS/CLUSTERSIZE + 1; i < FATCLUSTERS; i++)
+    if(fat[i] == 1){
+        dir[i_dir_entry_livre].used = 1;
+        strcpy(dir[i_dir_entry_livre].name, file_name);
+        dir[i_dir_entry_livre].first_block = i;
+        dir[i_dir_entry_livre].size = 0;
+        fat[i] = 2;
+        for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
+          bl_write(i, &fat[j]);
+          j += CLUSTERSIZE/2;
+        }
+        return 1;
+    }
+
   return 0;
-}
+  }
 
 int fs_remove(char *file_name) {
   printf("Função não implementada: fs_remove\n");
