@@ -47,6 +47,7 @@ int fs_init() {
     bl_read(i, &fat[j]);
     j += CLUSTERSIZE/2;
   }
+  bl_read(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
   
   for (unsigned i = 0; i < 32; i++)
     if(fat[i] != 3){
@@ -65,12 +66,13 @@ int fs_format() {
     fat[i] = 3;
   fat[i] = 4;
   i++;
-  for (; i < FATCLUSTERS; i++)
+  for (; i < bl_size(); i++)
     fat[i] = 1;
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
     bl_write(i, &fat[j]);
     j += CLUSTERSIZE/2;
   }
+  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
   return 1;
 }
 
@@ -106,6 +108,7 @@ int fs_create(char* file_name) {
           bl_write(i, &fat[j]);
           j += CLUSTERSIZE/2;
         }
+        bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
         return 1;
     }
 
