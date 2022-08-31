@@ -44,10 +44,10 @@ dir_entry dir[DIRENTRIES];
 
 int fs_init() {
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-    bl_read(i, &fat[j]);
+    bl_read(i, (char *)&fat[j]);
     j += CLUSTERSIZE/2;
   }
-  bl_read(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
+  bl_read(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
   
   for (unsigned i = 0; i < 32; i++)
     if(fat[i] != 3){
@@ -69,13 +69,13 @@ int fs_format() {
   for (; i < bl_size(); i++)
     fat[i] = 1;
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-    bl_write(i, &fat[j]);
+    bl_write(i, (char *)&fat[j]);
     j += CLUSTERSIZE/2;
   }
   for (unsigned i = 0; i < DIRENTRIES; i++)
     dir[i].used = 0;
   
-  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
+  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
   return 1;
 }
 
@@ -124,10 +124,10 @@ int fs_create(char* file_name) {
         dir[i_dir_entry_livre].size = 0;
         fat[i] = 2;
         for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-          bl_write(i, &fat[j]);
+          bl_write(i, (char *)&fat[j]);
           j += CLUSTERSIZE/2;
         }
-        bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
+        bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
         return 1;
     }
 
@@ -140,13 +140,13 @@ int fs_remove(char *file_name) {
       dir[i].used = 0;
       fat[dir[i].first_block] = 1;
       for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-        bl_write(i, &fat[j]);
+        bl_write(i, (char *)&fat[j]);
         j += CLUSTERSIZE/2;
       }
-      bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
+      bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
       return 1;
     }
-  printf("Arquivo não encontrado");
+  printf("Arquivo não encontrado\n");
   return 0;
 }
 
