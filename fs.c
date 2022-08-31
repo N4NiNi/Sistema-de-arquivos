@@ -43,55 +43,70 @@ dir_entry dir[DIRENTRIES];
 
 
 int fs_init() {
+  /* Lendo a fat no disco */
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
     bl_read(i, (char *)&fat[j]);
     j += CLUSTERSIZE/2;
   }
+  /* Lendo as entradas do diretório no disco */
   bl_read(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
   
-  for (unsigned i = 0; i < 32; i++)
+  /* Se os primeiros campos da fat identificar a própria fat,
+  então já tem uma fat salva. */
+  for (unsigned i = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++)
     if(fat[i] != 3){
+      /* Se não houver fat salva, a inicializa */
       printf("Imagem criada\n");
       fs_format();
       return 1;
     }
-    
   printf("Imagem recuperada\n");
   return 1;
 }
 
 int fs_format() {
   unsigned i = 0;
+  /* Marcando os setores ocupados pela fat no disco na própria fat */
   for (; i < FATCLUSTERS/CLUSTERSIZE * 2; i++)
     fat[i] = 3;
+  /* Marcando os setores ocupados pelas entradas do diretório no disco */
   fat[i] = 4;
   i++;
+  /* Marcando os setores livres do disco */
   for (; i < bl_size(); i++)
     fat[i] = 1;
+  /* Inicializando o diretório */
+  for (unsigned i = 0; i < DIRENTRIES; i++)
+    dir[i].used = 0;
+
+  /* Salvando a fat e as entradas do diretório no disco */
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
     bl_write(i, (char *)&fat[j]);
     j += CLUSTERSIZE/2;
   }
-  for (unsigned i = 0; i < DIRENTRIES; i++)
-    dir[i].used = 0;
-  
   bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
   return 1;
 }
 
 int fs_free() {
-  unsigned i = FATCLUSTERS/CLUSTERSIZE * 2 + 1;
+  unsigned i = FATCLUSTERS/CLUSTERSIZE * 2 + 1; //i começa a partir dos blocos que armazenam os arquivos
+
+  /* Busca sequencial na fat somando os blocos livres */
   unsigned setores_livres = 0;
   for (; i < bl_size(); i++)
     if(fat[i] == 1)
       setores_livres++;
+  
+  /* Retorna o tamanho dos blocos livres em bytes */
   return(setores_livres * SECTORSIZE);
 }
 
 int fs_list(char *buffer, int size) {
-  buffer[0] = '\0';
+  buffer[0] = '\0'; //inicializa buffer
+  /* Percorre diretório */
   for (unsigned i = 0; i < DIRENTRIES; i++)
-    if(dir[i].used){
+    if(dir[i].used){ //se entrada do diretório em uso
+      /* Formata a string e a coloca em buffer */
       char aux[100];
       aux[0] = '\0';
       strcat(aux, dir[i].name);
@@ -107,22 +122,26 @@ int fs_list(char *buffer, int size) {
 
 int fs_create(char* file_name) {
   unsigned i_dir_entry_livre = -1;
+  /* Busca sequencial no diretório verificando se arquivo existe */
   for (unsigned i = 0; i < DIRENTRIES; i++){
     if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
       printf("Arquivo já existente\n");
       return 0;
     }
     if(i_dir_entry_livre == -1 && !dir[i].used)
-      i_dir_entry_livre = i;
+      i_dir_entry_livre = i; //primeira entrada do diretório livre
   }
 
+  /* Percorre a fat procurando por setor livre */
   for (unsigned i = FATCLUSTERS/CLUSTERSIZE + 1; i < FATCLUSTERS; i++)
-    if(fat[i] == 1){
-        dir[i_dir_entry_livre].used = 1;
+    if(fat[i] == 1){ //se livre
+        dir[i_dir_entry_livre].used = 1; //marca a entrada como usada
         strcpy(dir[i_dir_entry_livre].name, file_name);
-        dir[i_dir_entry_livre].first_block = i;
+        dir[i_dir_entry_livre].first_block = i; //marca o bloco livre encontrado
         dir[i_dir_entry_livre].size = 0;
-        fat[i] = 2;
+        fat[i] = 2; //marca bloco como "Último Agrupamento de Arquivo"
+        
+        /* Salvando a fat e as entradas do diretório no disco */
         for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
           bl_write(i, (char *)&fat[j]);
           j += CLUSTERSIZE/2;
@@ -131,14 +150,17 @@ int fs_create(char* file_name) {
         return 1;
     }
 
-  return 0;
+  return 0; //não há setores livres
   }
 
 int fs_remove(char *file_name) {
+  /* Busca sequencial no diretório verificando se arquivo existe */
   for (unsigned i = 0; i < DIRENTRIES; i++)
-    if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
-      dir[i].used = 0;
-      fat[dir[i].first_block] = 1;
+    if(dir[i].used && strcmp(dir[i].name, file_name) == 0){ //se existe
+      dir[i].used = 0; //desmarca o campo "em uso"
+      fat[dir[i].first_block] = 1; //marca o bloco como "Agrupamento livre"
+      
+      /* Salvando a fat e as entradas do diretório no disco */
       for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
         bl_write(i, (char *)&fat[j]);
         j += CLUSTERSIZE/2;
