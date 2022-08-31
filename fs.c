@@ -89,8 +89,20 @@ int fs_free() {
 }
 
 int fs_list(char *buffer, int size) {
-  printf("Função não implementada: fs_list\n");
-  return 0;
+  buffer[0] = '\0';
+  for (unsigned i = 0; i < DIRENTRIES; i++)
+    if(dir[i].used){
+      char aux[100];
+      aux[0] = '\0';
+      strcat(aux, dir[i].name);
+      strcat(aux, "\t\t");
+      char size[20];
+      sprintf(size, "%d", dir[i].size);
+      strcat(aux, size);
+      strcat(aux, "\n");
+      strcat(buffer, aux);
+    }
+  return 1;
 }
 
 int fs_create(char* file_name) {
@@ -125,7 +137,6 @@ int fs_create(char* file_name) {
 int fs_remove(char *file_name) {
   for (unsigned i = 0; i < DIRENTRIES; i++)
     if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
-      //printf("Arquivo já existente\n");
       dir[i].used = 0;
       fat[dir[i].first_block] = 1;
       for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
