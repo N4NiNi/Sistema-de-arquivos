@@ -72,13 +72,20 @@ int fs_format() {
     bl_write(i, &fat[j]);
     j += CLUSTERSIZE/2;
   }
+  for (unsigned i = 0; i < DIRENTRIES; i++)
+    dir[i].used = 0;
+  
   bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
   return 1;
 }
 
 int fs_free() {
-  printf("Função não implementada: fs_free\n");
-  return 0;
+  unsigned i = FATCLUSTERS/CLUSTERSIZE * 2 + 1;
+  unsigned setores_livres = 0;
+  for (; i < bl_size(); i++)
+    if(fat[i] == 1)
+      setores_livres++;
+  return(setores_livres * SECTORSIZE);
 }
 
 int fs_list(char *buffer, int size) {
@@ -89,7 +96,7 @@ int fs_list(char *buffer, int size) {
 int fs_create(char* file_name) {
   unsigned i_dir_entry_livre = -1;
   for (unsigned i = 0; i < DIRENTRIES; i++){
-    if(strcmp(dir[i].name, file_name) == 0){
+    if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
       printf("Arquivo já existente\n");
       return 0;
     }
@@ -116,7 +123,19 @@ int fs_create(char* file_name) {
   }
 
 int fs_remove(char *file_name) {
-  printf("Função não implementada: fs_remove\n");
+  for (unsigned i = 0; i < DIRENTRIES; i++)
+    if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
+      //printf("Arquivo já existente\n");
+      dir[i].used = 0;
+      fat[dir[i].first_block] = 1;
+      for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
+        bl_write(i, &fat[j]);
+        j += CLUSTERSIZE/2;
+      }
+      bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, dir);
+      return 1;
+    }
+  printf("Arquivo não encontrado");
   return 0;
 }
 
