@@ -29,6 +29,8 @@
 #define CLUSTERSIZE 4096
 #define FATCLUSTERS 65536
 #define DIRENTRIES 128
+#define FILE_OPEN_R 2
+#define FILE_OPEN_W 3
 
 unsigned short fat[FATCLUSTERS];
 
@@ -126,7 +128,7 @@ int fs_create(char* file_name) {
   for (unsigned i = 0; i < DIRENTRIES; i++){
     if(dir[i].used && strcmp(dir[i].name, file_name) == 0){
       printf("Arquivo já existente\n");
-      return 0;
+      return -1;
     }
     if(i_dir_entry_livre == -1 && !dir[i].used)
       i_dir_entry_livre = i; //primeira entrada do diretório livre
@@ -147,10 +149,10 @@ int fs_create(char* file_name) {
           j += CLUSTERSIZE/2;
         }
         bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
-        return 1;
+        return i_dir_entry_livre;
     }
 
-  return 0; //não há setores livres
+  return -1; //não há setores livres
   }
 
 int fs_remove(char *file_name) {
@@ -173,22 +175,98 @@ int fs_remove(char *file_name) {
 }
 
 int fs_open(char *file_name, int mode) {
-  printf("Função não implementada: fs_open\n");
+  unsigned i;
+  for (i = 0; i < DIRENTRIES; i++)
+    if (dir[i].used && strcmp(dir[i].name, file_name) == 0)
+      break;
+  if(i == DIRENTRIES && mode == FS_R){
+    printf("Arquivo não encontrado\n");
+    return -1;
+  }
+
+  if(mode == FS_R){
+    dir[i].used = FILE_OPEN_R;
+    return i;
+  }
+  if (mode == FS_W){
+    if(i != DIRENTRIES){
+      printf("Removido arquivo\n");
+      fs_remove(file_name);
+    }
+    i = fs_create(file_name);
+    printf("i = %d\n", i);
+    if(i == -1)
+      return -1;
+    dir[i].used = FILE_OPEN_W;
+    bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+    return i;
+  }
   return -1;
 }
 
 int fs_close(int file)  {
-  printf("Função não implementada: fs_close\n");
-  return 0;
+  if(dir[file].used == FILE_OPEN_R || dir[file].used == FILE_OPEN_W){
+    dir[file].used = 1;
+    bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+    return 1;
+  }
+  else
+    return -1;
 }
 
 int fs_write(char *buffer, int size, int file) {
-  printf("Função não implementada: fs_write\n");
-  return -1;
+  printf("%d\n", file);
+  if (dir[file].used == FILE_OPEN_R || !dir[file].used)
+    return -1;
+  
+  unsigned i_fat = dir[file].first_block;
+  unsigned setor = FATCLUSTERS/CLUSTERSIZE * 2 + 1;
+  unsigned bytes_escritos = 0;
+  /* PROVAVELMENTE ESSE FOR COM PROBLEMA */
+  for (; bytes_escritos < size; ){
+    for (; setor < bl_size(); setor++){
+      printf("Analisando o setor %d\n", setor);
+      if(fat[setor] == 1)
+        break;
+    }
+    printf("Escrevendo no setor %d\n", setor);
+    if(!bl_write(setor, buffer))
+      return bytes_escritos;
+    buffer += CLUSTERSIZE;
+    bytes_escritos += CLUSTERSIZE;
+    dir[file].size = bytes_escritos;
+    fat[setor] = 2;
+    printf("i_Fat = %d\n", i_fat);
+    fat[i_fat] = setor;
+    i_fat = setor; 
+
+    /* Salvando a fat e as entradas do diretório no disco */
+    for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
+      bl_write(i, (char *)&fat[j]);
+      j += CLUSTERSIZE/2;
+    }
+    bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+
+  }
+  return bytes_escritos;
 }
 
 int fs_read(char *buffer, int size, int file) {
-  printf("Função não implementada: fs_read\n");
-  return -1;
+  buffer[0] = '\0';
+  if (dir[file].used == FILE_OPEN_W || !dir[file].used)
+    return -1;
+  
+  unsigned i_fat = dir[file].first_block;
+  unsigned bytes_lidos = 0;
+  for (; bytes_lidos < size;){
+    if(!bl_read(i_fat, buffer))
+      return bytes_lidos;
+    buffer += CLUSTERSIZE;
+    bytes_lidos += CLUSTERSIZE;
+    i_fat = fat[i_fat];
+    if(i_fat == 2)
+      return bytes_lidos;
+  }
+  return bytes_lidos;
 }
 
