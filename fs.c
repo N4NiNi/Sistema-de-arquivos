@@ -33,6 +33,9 @@
 #define FILE_OPEN_W 3
 
 unsigned short fat[FATCLUSTERS];
+unsigned offset_file_read = 0;
+char buffer_file_read[CLUSTERSIZE];
+unsigned offset_file_write = 0;
 
 typedef struct {
   char used;
@@ -187,6 +190,7 @@ int fs_open(char *file_name, int mode) {
 
   if(mode == FS_R){
     dir[i].used = FILE_OPEN_R;
+    offset_file_read = 0;
     return i;
   }
   if (mode == FS_W){
@@ -198,6 +202,7 @@ int fs_open(char *file_name, int mode) {
     if(i == -1)
       return -1;
     dir[i].used = FILE_OPEN_W;
+    offset_file_write = 0;
     bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
     return i;
   }
@@ -271,30 +276,34 @@ int fs_read(char *buffer, int size, int file) {
   unsigned i_fat = dir[file].first_block;
   unsigned bytes_lidos = 0;
 
-  char setor_data[CLUSTERSIZE];
-  setor_data[0] = '\0';
-  while (1){
-    printf("Lendo o setor %d  ", i_fat);
-    if(!bl_read(i_fat, setor_data)){
+  /* Ler o primeiro setor */
+  /* Vai escrevendo de size em size no buffer, a partir do buffer_file_read */
+  /* Proximo setor ate terminar */
+
+  if(!bl_read(i_fat, buffer_file_read)){
       printf("Erro\n");
-      return bytes_lidos;
-    }
-    printf("Sucesso\n");
-    bytes_lidos += CLUSTERSIZE;
-    strncpy(buffer, setor_data, size);
-    buffer[size%CLUSTERSIZE] = '\0';
-    puts(setor_data);
-    if (bytes_lidos >= size){
-      printf("Foi lido tudo size = %d | bytes_lidos = %d\n", size, bytes_lidos);
-      return 0;
-    }
-    if(fat[i_fat] == 2){
-      printf("FIM DO ARQUIVO\n");
-      return bytes_lidos;
-    }
-    i_fat = fat[i_fat];
+      return -1;
   }
-  return bytes_lidos;
+
+  if(offset_file_read == dir[file].size)
+    return 0;
+  for (unsigned i = 0; i < size; i++){
+    buffer[i] = buffer_file_read[offset_file_read];
+    offset_file_read++;
+    bytes_lidos++;
+
+    if (offset_file_read % CLUSTERSIZE == 0){
+      if(fat[i_fat] == 2){
+        return bytes_lidos;
+      }
+      i_fat = fat[i_fat];
+      if(!bl_read(i_fat, buffer_file_read)){
+        printf("Erro\n");
+        return -1;
+      }
+    }
+  }
+  return bytes_lidos; 
 }
 
 void salvaFAT(){
