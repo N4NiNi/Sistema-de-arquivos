@@ -43,6 +43,7 @@ typedef struct {
 
 dir_entry dir[DIRENTRIES];
 
+void salvaFAT();
 
 int fs_init() {
   /* Lendo a fat no disco */
@@ -194,7 +195,6 @@ int fs_open(char *file_name, int mode) {
       fs_remove(file_name);
     }
     i = fs_create(file_name);
-    printf("i = %d\n", i);
     if(i == -1)
       return -1;
     dir[i].used = FILE_OPEN_W;
@@ -215,40 +215,52 @@ int fs_close(int file)  {
 }
 
 int fs_write(char *buffer, int size, int file) {
-  printf("%d\n", file);
   if (dir[file].used == FILE_OPEN_R || !dir[file].used)
     return -1;
   
+  /* Encontrar o ultimo bloco do arquivo */
   unsigned i_fat = dir[file].first_block;
-  unsigned setor = FATCLUSTERS/CLUSTERSIZE * 2 + 1;
+  for(; fat[i_fat] != 2; i_fat = fat[i_fat]);  
+  char arq_data[CLUSTERSIZE] = {};
+  if(!bl_read(i_fat, arq_data))
+    return -1;
+
+  /* Ler o buffer e ir salvando */
+  unsigned setor = FATCLUSTERS/CLUSTERSIZE * 2 + 1; //inicia na primeira posiçao de dados da fat
   unsigned bytes_escritos = 0;
-  /* PROVAVELMENTE ESSE FOR COM PROBLEMA */
-  for (; bytes_escritos < size; ){
-    for (; setor < bl_size(); setor++){
-      printf("Analisando o setor %d\n", setor);
-      if(fat[setor] == 1)
-        break;
-    }
-    printf("Escrevendo no setor %d\n", setor);
-    if(!bl_write(setor, buffer))
-      return bytes_escritos;
-    buffer += CLUSTERSIZE;
-    bytes_escritos += CLUSTERSIZE;
-    dir[file].size = bytes_escritos;
-    fat[setor] = 2;
-    printf("i_Fat = %d\n", i_fat);
-    fat[i_fat] = setor;
-    i_fat = setor; 
+  for (unsigned i = 0; i < size; i++){
+    arq_data[dir[file].size % CLUSTERSIZE] = buffer[i];
+    bytes_escritos++;
+    dir[file].size++;
 
-    /* Salvando a fat e as entradas do diretório no disco */
-    for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-      bl_write(i, (char *)&fat[j]);
-      j += CLUSTERSIZE/2;
-    }
-    bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+    //se arq_data já tem o tamanho de um setor, ou já foi salvo os "size" bytes em arq_ata
+    if(dir[file].size % CLUSTERSIZE == 0 || i + 1 == size){
+        printf("Escrevendo no setor %d  ", i_fat);
+        puts(buffer);
+        if(!bl_write(i_fat, arq_data)){
+          printf("Algum problema\n");
+          salvaFAT();
+          return bytes_escritos;
+        }
+        arq_data[0] = '\0';
+        printf("Sucesso\n");
+        if(i + 1 == size){ //se acabou o buffer
+          salvaFAT();
+          return bytes_escritos;
+        }
 
+        //senão, necessário mais um setor
+        for (; setor < bl_size(); setor++){
+          printf("Procurando espaço livre. Analisando o setor %d\n", setor);
+          if(fat[setor] == 1)
+            break;
+        }
+        fat[setor] = 2;
+        fat[i_fat] = setor;
+        i_fat = setor; 
+    }
   }
-  return bytes_escritos;
+  return 0;
 }
 
 int fs_read(char *buffer, int size, int file) {
@@ -258,15 +270,39 @@ int fs_read(char *buffer, int size, int file) {
   
   unsigned i_fat = dir[file].first_block;
   unsigned bytes_lidos = 0;
-  for (; bytes_lidos < size;){
-    if(!bl_read(i_fat, buffer))
+
+  char setor_data[CLUSTERSIZE];
+  setor_data[0] = '\0';
+  while (1){
+    printf("Lendo o setor %d  ", i_fat);
+    if(!bl_read(i_fat, setor_data)){
+      printf("Erro\n");
       return bytes_lidos;
-    buffer += CLUSTERSIZE;
+    }
+    printf("Sucesso\n");
     bytes_lidos += CLUSTERSIZE;
-    i_fat = fat[i_fat];
-    if(i_fat == 2)
+    strncpy(buffer, setor_data, size);
+    buffer[size%CLUSTERSIZE] = '\0';
+    puts(setor_data);
+    if (bytes_lidos >= size){
+      printf("Foi lido tudo size = %d | bytes_lidos = %d\n", size, bytes_lidos);
+      return 0;
+    }
+    if(fat[i_fat] == 2){
+      printf("FIM DO ARQUIVO\n");
       return bytes_lidos;
+    }
+    i_fat = fat[i_fat];
   }
   return bytes_lidos;
+}
+
+void salvaFAT(){
+  /* Salvando a fat e as entradas do diretório no disco */
+  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
+    bl_write(i, (char *)&fat[j]);
+    j += CLUSTERSIZE/2;
+  }
+  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
 }
 
