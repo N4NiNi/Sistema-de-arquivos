@@ -48,6 +48,7 @@ typedef struct {
 dir_entry dir[DIRENTRIES];
 
 void salvaFAT();
+void salvaDIR();
 
 int fs_init() {
   /* Lendo a fat no disco */
@@ -86,12 +87,8 @@ int fs_format() {
   for (unsigned i = 0; i < DIRENTRIES; i++)
     dir[i].used = 0;
 
-  /* Salvando a fat e as entradas do diretório no disco */
-  for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-    bl_write(i, (char *)&fat[j]);
-    j += CLUSTERSIZE/2;
-  }
-  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+  salvaFAT();
+  salvaDIR();
   return 1;
 }
 
@@ -148,12 +145,8 @@ int fs_create(char* file_name) {
         dir[i_dir_entry_livre].size = 0;
         fat[i] = 2; //marca bloco como "Último Agrupamento de Arquivo"
         
-        /* Salvando a fat e as entradas do diretório no disco */
-        for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-          bl_write(i, (char *)&fat[j]);
-          j += CLUSTERSIZE/2;
-        }
-        bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+        salvaFAT();
+        salvaDIR();
         return i_dir_entry_livre;
     }
 
@@ -167,12 +160,8 @@ int fs_remove(char *file_name) {
       dir[i].used = 0; //desmarca o campo "em uso"
       fat[dir[i].first_block] = 1; //marca o bloco como "Agrupamento livre"
       
-      /* Salvando a fat e as entradas do diretório no disco */
-      for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
-        bl_write(i, (char *)&fat[j]);
-        j += CLUSTERSIZE/2;
-      }
-      bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+      salvaFAT();
+      salvaDIR();
       return 1;
     }
   printf("Arquivo não encontrado\n");
@@ -181,9 +170,11 @@ int fs_remove(char *file_name) {
 
 int fs_open(char *file_name, int mode) {
   unsigned i;
+  
   for (i = 0; i < DIRENTRIES; i++)
     if (dir[i].used && strcmp(dir[i].name, file_name) == 0)
       break;
+
   if(i == DIRENTRIES && mode == FS_R){
     printf("Arquivo não encontrado\n");
     return -1;
@@ -194,20 +185,22 @@ int fs_open(char *file_name, int mode) {
     offset_file_read = 0;
     return i;
   }
+
   if (mode == FS_W){
-    if(i != DIRENTRIES){
-      printf("Removido arquivo\n");
+
+    if(i != DIRENTRIES)
       fs_remove(file_name);
-    }
+    
     i = fs_create(file_name);
-    if(i == -1)
-      return -1;
+    if(i == -1) return -1;
+
     dir[i].used = FILE_OPEN_W;
     dir[i].size = 0;
     offset_file_write = 0;
-    bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+    salvaFAT();
     return i;
   }
+
   return -1;
 }
 
@@ -216,30 +209,16 @@ int fs_close(int file)  {
       if(offset_file_write > 0){
         int i_fat = dir[file].first_block;
         for(; fat[i_fat] != 2; i_fat = fat[i_fat]); //ir até o último setor
-        for (unsigned setor = FATCLUSTERS/CLUSTERSIZE * 2 + 1; setor < bl_size(); setor++){
-          printf("Procurando espaço livre. Analisando o setor %d\n", setor);
-          if(fat[setor] == 1){
-            fat[setor] = 2;
-            fat[i_fat] = setor;
-            i_fat = setor; 
-            break;
-          }
-        }
-        printf("Escrevendo no setor %d  ", i_fat);
-        puts(buffer_file_write);
         if(!bl_write(i_fat, buffer_file_write)){
           salvaFAT();
           return -1;
         }
-        offset_file_write = 0;
-        buffer_file_write[offset_file_write] = '\0';
-        printf("Sucesso\n");
       }
   }
   
   if(dir[file].used == FILE_OPEN_R || dir[file].used == FILE_OPEN_W){
     dir[file].used = 1;
-      bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+    salvaDIR();
     return 1;
   }
   else
@@ -253,18 +232,12 @@ int fs_write(char *buffer, int size, int file) {
   /* Ler o buffer e ir salvando no buffer */
   unsigned bytes_escritos = 0;
   unsigned i_fat = dir[file].first_block;
-  for (unsigned i = 0; i < size; i++){
-    buffer_file_write[offset_file_write] = buffer[i];
-    buffer_file_write[offset_file_write + 1] = '\0';
-    bytes_escritos++;
-    dir[file].size++;
-    offset_file_write++;
-
+  for (bytes_escritos = 0; bytes_escritos < size; bytes_escritos++){
     //se buffer_file_write tem o tamanho de um setor
-    if(offset_file_write == CLUSTERSIZE){
+    if(offset_file_write >= CLUSTERSIZE){
       for(; fat[i_fat] != 2; i_fat = fat[i_fat]); //ir até o último setor
+      bl_write(i_fat, buffer_file_write);
       for (unsigned setor = FATCLUSTERS/CLUSTERSIZE * 2 + 1; setor < bl_size(); setor++){
-        printf("Procurando espaço livre. Analisando o setor %d\n", setor);
         if(fat[setor] == 1){
           fat[setor] = 2;
           fat[i_fat] = setor;
@@ -272,17 +245,14 @@ int fs_write(char *buffer, int size, int file) {
           break;
         }
       }
-      printf("Escrevendo no setor %d  ", i_fat);
-      puts(buffer);
-      if(!bl_write(i_fat, buffer_file_write)){
-        salvaFAT();
-        return bytes_escritos;
-      }
       offset_file_write = 0;
-      buffer_file_write[offset_file_write] = '\0';
-      printf("Sucesso\n");
     }
+
+    buffer_file_write[offset_file_write] = buffer[bytes_escritos];
+    dir[file].size++;
+    offset_file_write++;
   }
+  salvaFAT();
   return bytes_escritos;
 }
 
@@ -301,19 +271,18 @@ int fs_read(char *buffer, int size, int file) {
   }
 
   /* Vai escrevendo de size em size no buffer, a partir do buffer_file_read */
-  for (unsigned i = 0; i < size; i++){
-    if (offset_file_read == dir[file].size)
+  for (unsigned bytes_lidos = 0; bytes_lidos < size; bytes_lidos++){
+    if (offset_file_read == dir[file].size) //Fim do arquivo
       return bytes_lidos;
 
-    buffer[i] = buffer_file_read[offset_file_read % CLUSTERSIZE];
+    buffer[bytes_lidos] = buffer_file_read[offset_file_read % CLUSTERSIZE];
     offset_file_read++;
-    bytes_lidos++;
-  
-    if(offset_file_read % CLUSTERSIZE == 0){
-      if(fat[i_fat] == 2)
+
+    if(offset_file_read % CLUSTERSIZE == 0){  //Bloco inteiro lido
+      if(fat[i_fat] == 2) //Não tem próximo bloco :(
         return bytes_lidos;
       i_fat = fat[i_fat];
-      if(!bl_read(i_fat, buffer_file_read))
+      if(!bl_read(i_fat, buffer_file_read)) //inserir no buffer_read o próximo bloco
         return -1;
     }
   }
@@ -321,11 +290,12 @@ int fs_read(char *buffer, int size, int file) {
 }
 
 void salvaFAT(){
-  /* Salvando a fat e as entradas do diretório no disco */
   for (unsigned i = 0, j = 0; i < FATCLUSTERS/CLUSTERSIZE * 2; i++){
     bl_write(i, (char *)&fat[j]);
     j += CLUSTERSIZE/2;
   }
-  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
 }
 
+void salvaDIR(){
+  bl_write(FATCLUSTERS/CLUSTERSIZE * 2 + 1, (char *)dir);
+}
